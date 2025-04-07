@@ -1,0 +1,469 @@
+<script>
+  // Wait until A-Frame is available
+  (function checkAFrame() {
+    if (typeof AFRAME === 'undefined') {
+      // A-Frame not loaded yet, check again in 100ms
+      setTimeout(checkAFrame, 100);
+      return;
+    }
+    
+    // Store initial camera direction to reset to later
+    var initialCameraRotation = {x: 0, y: 0, z: 0};
+    
+    // Fix for A-Frame look-controls to ensure mouse-up is always detected
+    AFRAME.registerComponent('improved-look-controls', {
+      dependencies: ['look-controls'],
+      
+      init: function() {
+        this.lookControls = this.el.components['look-controls'];
+        this.originalMouseUp = this.lookControls.onMouseUp;
+        this.originalMouseDown = this.lookControls.onMouseDown;
+        this.onDocumentMouseUp = this.onDocumentMouseUp.bind(this);
+        this.onDocumentMouseDown = this.onDocumentMouseDown.bind(this);
+        document.addEventListener('mouseup', this.onDocumentMouseUp);
+        document.addEventListener('mousedown', this.onDocumentMouseDown);
+        console.log('Improved look controls initialized');
+      },
+      
+      onDocumentMouseDown: function (evt) {
+        this.mouseIsDown = true;
+      },
+      
+      onDocumentMouseUp: function (evt) {
+        if (this.mouseIsDown) {
+          this.mouseIsDown = false;
+          if (this.lookControls && this.lookControls.mouseDown) {
+            this.lookControls.mouseDown = false;
+            console.log('Mouse up enforced');
+          }
+        }
+      },
+      
+      remove: function () {
+        document.removeEventListener('mouseup', this.onDocumentMouseUp);
+        document.removeEventListener('mousedown', this.onDocumentMouseDown);
+      }
+    });
+    
+    // Add device orientation handler
+    AFRAME.registerComponent('device-orientation-reset-controls', {
+      schema: { enabled: {default: true} },
+      
+      init: function () {
+        this.onDeviceOrientation = this.onDeviceOrientation.bind(this);
+        this.resetOrientation = this.resetOrientation.bind(this);
+        this.referenceAlpha = 0;
+        this.referenceBeta = 0;
+        this.referenceGamma = 0;
+        this.hasDeviceOrientation = false;
+        window.deviceOrientationResetComponent = this;
+        if (this.data.enabled) { this.addEventListeners(); }
+      },
+      
+      addEventListeners: function () {
+        window.addEventListener('deviceorientation', this.onDeviceOrientation);
+      },
+      
+      removeEventListeners: function () {
+        window.removeEventListener('deviceorientation', this.onDeviceOrientation);
+      },
+      
+      onDeviceOrientation: function (evt) {
+        this.hasDeviceOrientation = true;
+        this.currentAlpha = evt.alpha;
+        this.currentBeta = evt.beta;
+        this.currentGamma = evt.gamma;
+      },
+      
+      resetOrientation: function () {
+        if (!this.hasDeviceOrientation) return;
+        this.referenceAlpha = this.currentAlpha;
+        this.referenceBeta = this.currentBeta;
+        this.referenceGamma = this.currentGamma;
+        console.log("Device orientation reset. New reference:", {alpha: this.referenceAlpha, beta: this.referenceBeta, gamma: this.referenceGamma});
+        if (window.cameraResetComponent) { window.cameraResetComponent.resetMobile(); }
+      },
+      
+      update: function (oldData) {
+        if (this.data.enabled !== oldData.enabled) {
+          this.data.enabled ? this.addEventListeners() : this.removeEventListeners();
+        }
+      },
+      
+      remove: function () {
+        this.removeEventListeners();
+      }
+    });
+    
+    // Unified camera reset component
+    AFRAME.registerComponent('camera-reset', {
+      schema: {
+        initialOrientation: { type: 'vec3', default: { x: 0, y: 0, z: 0 } },
+        preserveOffset: { type: 'boolean', default: false }
+      },
+      
+      init: function() {
+        console.log('Enhanced camera reset component initialized');
+        window.cameraResetComponent = this;
+        this.cameraEl = this.el;
+        this.targetRotation = { x: 0, y: 0, z: 0 };
+        this.initialDeviceOrientation = null;
+        this.currentDeviceOrientation = null;
+        this.driftOffset = { alpha: 0, beta: 0, gamma: 0 };
+        this.setupDeviceOrientationTracking();
+        window.recenterCameraFromAFrame = this.recenter.bind(this);
+        this.cameraEl.addEventListener('recenter', this.recenter.bind(this));
+        this.el.sceneEl.addEventListener('loaded', () => {
+          this.storeInitialOrientation();
+          initialCameraRotation = Object.assign({}, this.el.getAttribute('rotation'));
+          console.log("Initial camera rotation stored:", initialCameraRotation);
+        });
+      },
+      
+      storeInitialOrientation: function() {
+        const rotation = this.cameraEl.getAttribute('rotation');
+        if (rotation) {
+          this.initialCameraRotation = { x: rotation.x || 0, y: rotation.y || 0, z: rotation.z || 0 };
+          console.log('Stored initial camera rotation:', this.initialCameraRotation);
+        }
+        const lookControls = this.cameraEl.components['look-controls'];
+        if (lookControls) {
+          if (lookControls.pitchObject && lookControls.yawObject) {
+            this.initialLookControlsState = { pitch: lookControls.pitchObject.rotation.x, yaw: lookControls.yawObject.rotation.y };
+            console.log('Stored initial look-controls state:', this.initialLookControlsState);
+          }
+          if (lookControls.magicWindowOrientation) {
+            this.initialMagicWindowOrientation = { x: lookControls.magicWindowOrientation.x, y: lookControls.magicWindowOrientation.y };
+            console.log('Stored initial magic window orientation:', this.initialMagicWindowOrientation);
+          }
+        }
+      },
+      
+      setupDeviceOrientationTracking: function() {
+        if (AFRAME.utils.device.isMobile() || /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent)) {
+          console.log('Setting up enhanced device orientation tracking for mobile');
+          this.deviceOrientationHandler = (event) => {
+            this.currentDeviceOrientation = { alpha: event.alpha || 0, beta: event.beta || 0, gamma: event.gamma || 0 };
+            if (!this.initialDeviceOrientation) {
+              this.initialDeviceOrientation = { ...this.currentDeviceOrientation };
+              console.log('Initialized device orientation reference:', this.initialDeviceOrientation);
+            }
+            this.calculateDrift();
+          };
+          window.addEventListener('deviceorientation', this.deviceOrientationHandler);
+        }
+      },
+      
+      calculateDrift: function() {
+        if (!this.initialDeviceOrientation || !this.currentDeviceOrientation) return;
+        this.driftOffset = {
+          alpha: this.currentDeviceOrientation.alpha - this.initialDeviceOrientation.alpha,
+          beta: this.currentDeviceOrientation.beta - this.initialDeviceOrientation.beta,
+          gamma: this.currentDeviceOrientation.gamma - this.initialDeviceOrientation.gamma
+        };
+        if (this.driftOffset.alpha > 180) this.driftOffset.alpha -= 360;
+        if (this.driftOffset.alpha < -180) this.driftOffset.alpha += 360;
+        const driftMagnitude = Math.abs(this.driftOffset.alpha) + Math.abs(this.driftOffset.beta) + Math.abs(this.driftOffset.gamma);
+        if (driftMagnitude > 20) {
+          console.log('Significant drift detected:', this.driftOffset);
+        }
+      },
+      
+      reset: function() {
+        var cameraEl = this.el;
+        cameraEl.setAttribute('rotation', initialCameraRotation);
+        var lookControls = cameraEl.components['look-controls'];
+        if (lookControls) {
+          if (lookControls.pitchObject) lookControls.pitchObject.rotation.x = 0;
+          if (lookControls.yawObject) lookControls.yawObject.rotation.y = 0;
+        }
+        console.log("Camera reset to initial position");
+      },
+      
+      resetMobile: function() {
+        var cameraEl = this.el;
+        var lookControls = cameraEl.components['look-controls'];
+        if (lookControls) {
+          if (typeof DeviceOrientationEvent !== 'undefined' && lookControls.magicWindowControls) {
+            var currentRotation = cameraEl.getAttribute('rotation');
+            cameraEl.setAttribute('rotation', {x: 0, y: currentRotation.y, z: 0});
+            if (lookControls.hasDeviceOrientation) {
+              lookControls.oldRotation = lookControls.el.object3D.rotation.clone();
+              lookControls.oldPolarAngle = 0;
+              if (lookControls.dolly) {
+                lookControls.dolly.quaternion.copy(new THREE.Quaternion());
+                lookControls.dolly.matrixNeedsUpdate = true;
+              }
+              if (lookControls.deviceOrientation) {
+                lookControls.previousAlphaValue = lookControls.deviceOrientation.alpha;
+                lookControls.previousBetaValue = lookControls.deviceOrientation.beta;
+                lookControls.previousGammaValue = lookControls.deviceOrientation.gamma;
+              }
+            }
+          }
+        }
+        console.log("Mobile camera view recentered to current heading");
+      },
+      
+      recenter: function() {
+        console.log('Enhanced A-Frame camera recenter function called');
+        try {
+          const isMobile = AFRAME.utils.device.isMobile() || /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
+          console.log('Device detected as:', isMobile ? 'mobile' : 'desktop');
+          const lookControls = this.cameraEl.components['look-controls'];
+          if (!lookControls) {
+            console.error('Look-controls component not found');
+            return false;
+          }
+          if (isMobile) {
+            const currentRotation = this.cameraEl.getAttribute('rotation');
+            console.log('Current rotation before recenter:', currentRotation);
+            if (this.driftOffset && lookControls.hasOwnProperty('deviceOrientationMagicWindowDelta')) {
+              console.log('Using drift compensation approach');
+              if (lookControls.deviceOrientationMagicWindowDelta) {
+                lookControls.deviceOrientationMagicWindowDelta.x -= this.driftOffset.beta * 0.1;
+                lookControls.deviceOrientationMagicWindowDelta.y -= this.driftOffset.alpha * 0.1;
+                console.log('Applied drift compensation to magic window delta');
+              }
+            }
+            console.log('Using enhanced remove/re-add approach for mobile');
+            const oldLookControlsData = this.cameraEl.getAttribute('look-controls');
+            this.cameraEl.removeAttribute('look-controls');
+            setTimeout(() => {
+              const newRotation = {
+                x: 0,
+                y: currentRotation.y - (this.driftOffset?.alpha || 0) * 0.1,
+                z: 0
+              };
+              console.log('Setting compensated rotation:', newRotation);
+              this.cameraEl.setAttribute('rotation', newRotation);
+              this.initialDeviceOrientation = { ...this.currentDeviceOrientation };
+              setTimeout(() => {
+                this.cameraEl.setAttribute('look-controls', oldLookControlsData);
+                console.log('Look-controls re-attached with drift compensation');
+                if (this.cameraEl.components['look-controls'] && typeof this.cameraEl.components['look-controls'].updateOrientation === 'function') {
+                  this.cameraEl.components['look-controls'].updateOrientation();
+                }
+              }, 100);
+            }, 100);
+            this.initialDeviceOrientation = { ...this.currentDeviceOrientation };
+            console.log('Reset device orientation reference point to current orientation');
+          } else {
+            if (lookControls.yawObject && lookControls.pitchObject) {
+              lookControls.pitchObject.rotation.x = 0;
+              lookControls.yawObject.rotation.y = 0;
+              console.log('Desktop: Reset rotation with enhanced approach');
+              this.cameraEl.setAttribute('rotation', this.targetRotation);
+            } else {
+              this.cameraEl.setAttribute('rotation', this.targetRotation);
+              console.log('Fallback: Direct rotation reset');
+            }
+          }
+          console.log('Enhanced camera recentering completed');
+          return true;
+        } catch (e) {
+          console.error('Error in enhanced camera recenter:', e);
+          return false;
+        }
+      }
+    });
+
+    // Global recenter function
+    window.recenterCamera = function() {
+      const cameraSelectors = [
+        '#cameraEntity',
+        'a-camera',
+        '[camera]',
+        'a-entity[camera]',
+        '.camera',
+        'a-entity[look-controls]'
+      ];
+      let cameraEl = null;
+      for (let selector of cameraSelectors) {
+        const el = document.querySelector(selector);
+        if (el) {
+          cameraEl = el;
+          console.log('Found camera using selector:', selector);
+          break;
+        }
+      }
+      if (!cameraEl) {
+        cameraEl = document.querySelector('[camera-reset]');
+        if (cameraEl) { console.log('Found camera using camera-reset component'); }
+      }
+      if (!cameraEl) {
+        const sceneEl = document.querySelector('a-scene');
+        if (sceneEl) {
+          const allEntities = sceneEl.querySelectorAll('a-entity');
+          for (let entity of allEntities) {
+            if (entity.components && (entity.components.camera || entity.components['look-controls'] || entity.getAttribute('camera') !== null)) {
+              cameraEl = entity;
+              console.log('Found camera by checking all entities');
+              break;
+            }
+          }
+        }
+      }
+      if (cameraEl) {
+        console.log('Found camera entity, attempting to recenter');
+        if (cameraEl.components && cameraEl.components['camera-reset']) {
+          console.log('Using component\'s recenter method');
+          return cameraEl.components['camera-reset'].recenter();
+        }
+        if (window.cameraResetComponent) {
+          console.log('Using global cameraResetComponent');
+          window.cameraResetComponent.cameraEl = cameraEl;
+          return window.cameraResetComponent.recenter();
+        }
+        console.log('Dispatching recenter event to camera');
+        cameraEl.dispatchEvent(new CustomEvent('recenter'));
+        return true;
+      } else {
+        console.error('Camera entity not found for recentering');
+        return false;
+      }
+    };
+    
+    console.log('Enhanced camera components registered successfully');
+  })();
+  
+  window.addEventListener('load', function() {
+    var video = document.querySelector('#videoSource');
+    var playButton = document.getElementById('playButtonHTML');
+    var scrubber = document.getElementById('progressScrubber');
+    var progressFill = document.getElementById('progressFill');
+    var timeDisplay = document.getElementById('timeDisplay');
+    var recenterButton = document.getElementById('recenterButton');
+
+    // Wait for A-Frame to be fully initialized
+    var scene = document.querySelector('a-scene');
+    if (scene.hasLoaded) {
+      setupAfterSceneLoaded();
+    } else {
+      scene.addEventListener('loaded', setupAfterSceneLoaded);
+    }
+
+    function setupAfterSceneLoaded() {
+      setTimeout(function() {
+        const camera = document.querySelector('a-camera') || document.querySelector('[camera]') || document.querySelector('a-entity[camera]');
+        if (camera) {
+          console.log('Adding camera-reset, improved-look-controls and device-orientation-reset-controls to camera');
+          camera.setAttribute('camera-reset', '');
+          camera.setAttribute('improved-look-controls', '');
+          camera.setAttribute('device-orientation-reset-controls', '');
+        }
+      }, 1000);
+      
+      function updateProgress() {
+        if (video && video.duration) {
+          var progress = (video.currentTime / video.duration) * 100;
+          if (progressFill) progressFill.style.width = progress + '%';
+          var currentMinutes = Math.floor(video.currentTime / 60);
+          var currentSeconds = Math.floor(video.currentTime % 60);
+          var totalMinutes = Math.floor(video.duration / 60);
+          var totalSeconds = Math.floor(video.duration % 60);
+          currentSeconds = currentSeconds < 10 ? '0' + currentSeconds : currentSeconds;
+          totalSeconds = totalSeconds < 10 ? '0' + totalSeconds : totalSeconds;
+          if (timeDisplay) {
+            timeDisplay.textContent = currentMinutes + ':' + currentSeconds + ' / ' + totalMinutes + ':' + totalSeconds;
+          }
+        }
+      }
+
+      if (playButton && video) {
+        playButton.addEventListener('click', function() {
+          if (video.paused) {
+              video.play().then(function() {
+                  playButton.innerHTML = '<i class="fas fa-pause"></i>'; // Pause icon
+              }).catch(function(err) {
+                  console.error('Error playing video:', err);
+              });
+          } else {
+              video.pause();
+              playButton.innerHTML = '<i class="fas fa-play"></i>'; // Play icon
+          }
+        });
+      }
+      
+      if (video) {
+        video.addEventListener('timeupdate', updateProgress);
+        video.addEventListener('loadedmetadata', updateProgress);
+      }
+      
+      if (scrubber && video) {
+        scrubber.addEventListener('click', function(e) {
+          var rect = scrubber.getBoundingClientRect();
+          var clickX = e.clientX - rect.left;
+          var percentClicked = clickX / rect.width;
+          if (video.duration) { video.currentTime = percentClicked * video.duration; }
+        });
+      }
+      
+      if (recenterButton) {
+        recenterButton.addEventListener('click', function() {
+          console.log("Recenter button clicked");
+          window.recenterCamera();
+        });
+      }
+      
+      document.addEventListener('keydown', function(e) {
+        if (e.code === 'Space' && playButton) {
+          playButton.click();
+        } else if (e.code === 'KeyR' && recenterButton) {
+          recenterButton.click();
+        }
+      });
+
+      // --- Custom Media Trigger Functionality ---
+      function setupMediaTrigger() {
+        var mediaElement = document.querySelector('#videoSource, audio#videoSource');
+        if (!mediaElement) {
+          console.error("No media element found with ID 'videoSource'");
+          return;
+        }
+        var overlayContainer = document.getElementById('teaserOutroContainer');
+        if (!overlayContainer) {
+          console.error("No element with ID 'teaserOutroContainer' found.");
+          return;
+        }
+        overlayContainer.style.display = 'none';
+        var triggerTimeRaw = {{wf {&quot;path&quot;:&quot;teasercta-timein&quot;,&quot;type&quot;:&quot;Number&quot;\} }};
+        if (isNaN(triggerTimeRaw)) {
+          console.error("Trigger time not defined or invalid on media element.");
+          return;
+        }
+        // If your trigger value is in milliseconds, uncomment the next line:
+        // var triggerTime = triggerTimeRaw / 1000;
+        // Otherwise, if it’s in seconds, use:
+        var triggerTime = triggerTimeRaw;
+        
+        // Track the last time so we can detect an upward crossing of the trigger time.
+        var lastTime = 0;
+        mediaElement.addEventListener('timeupdate', function() {
+          // Check for upward crossing of the trigger time.
+          if (lastTime < triggerTime && mediaElement.currentTime >= triggerTime) {
+            // Show overlay if it’s currently hidden.
+            if (overlayContainer.style.display === 'none' || overlayContainer.style.display === '') {
+              overlayContainer.style.display = 'flex';
+              console.log('Trigger time reached. Showing overlay.');
+            }
+          }
+          lastTime = mediaElement.currentTime;
+        });
+        
+        // --- Overlay Dismissal Functionality ---
+        var teaserOutroLinkBlock = document.getElementById('teaserOutroLinkBlock');
+        if (overlayContainer && teaserOutroLinkBlock) {
+          overlayContainer.addEventListener('click', function(e) {
+            if (!teaserOutroLinkBlock.contains(e.target)) {
+              overlayContainer.style.display = 'none';
+              console.log('Overlay dismissed by clicking outside the link block.');
+            }
+          });
+        }
+      }
+      
+      setupMediaTrigger();
+    }
+  });
+</script>
