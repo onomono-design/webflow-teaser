@@ -1,0 +1,46 @@
+<!-- Recenter button -->
+<button id="recenterButton">
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24">
+    <path d="M12 4c-4.97 0-9 4.03-9 9s4.03 9 9 9 9-4.03 9-9-4.03-9-9-9zm0 16c-3.86 0-7-3.14-7-7s3.14-7 7-7 7 3.14 7 7-3.14 7-7 7zm0-12c-2.76 0-5 2.24-5 5s2.24 5 5 5 5-2.24 5-5-2.24-5-5-5zm0 8c-1.65 0-3-1.35-3-3s1.35-3 3-3 3 1.35 3 3-1.35 3-3 3z"/>
+  </svg>
+  Recenter
+</button>
+
+<!-- Video controls with scrubber -->
+<div id="videoControls">
+  <button id="playButtonHTML">PLAY</button>
+  <div id="progressContainer">
+    <div id="progressScrubber">
+      <div id="progressFill"></div>
+    </div>
+    <div id="timeDisplay">0:00 / 0:00</div>
+  </div>
+</div>
+
+<a-scene vr-mode-ui="enabled: false">
+  <a-assets>
+    <!-- 360 video from CDN -->
+    <video id="videoSource"
+           loop
+           crossorigin="anonymous"
+           playsinline webkit-playsinline
+           preload="auto"
+           src="{{wf {&quot;path&quot;:&quot;xr-src&quot;,&quot;type&quot;:&quot;Link&quot;\} }}">
+    </video>
+  </a-assets>
+  
+  <!-- 360 video sphere -->
+  <a-videosphere
+    rotation="0 -90 0" 
+    src="#videoSource">
+  </a-videosphere>
+
+  <!-- Camera with improved controls -->
+  <a-camera look-controls="reverseMouseDrag: true; magicWindowTrackingEnabled: true; 
+                          touchEnabled: true; pointerLockEnabled: false"
+            camera-reset
+            device-orientation-reset-controls
+            improved-look-controls>
+    <!-- No in-scene UI elements -->
+  </a-camera>
+</a-scene>
