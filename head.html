@@ -1,0 +1,96 @@
+<meta charset="utf-8">
+<meta name="description" content="360° Video Viewer with A-Frame">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.4/css/all.min.css">
+<!-- A-Frame library from CDN -->
+<script src="https://aframe.io/releases/1.4.0/aframe.min.js"></script>
+<style>
+  body {
+    margin: 0;
+    padding: 0;
+    background-color: #000;
+  }
+  #videoControls {
+    position: fixed;
+    bottom: 20px;
+    left: 50%;
+    transform: translateX(-50%);
+    z-index: 999;
+    background-color: rgba(0, 0, 0, 0.7);
+    padding: 10px 15px;
+    border-radius: 8px;
+    display: flex;
+    align-items: center;
+    max-width: 90%;
+    width: 500px;
+    gap: 12px;
+  }
+  #recenterButton {
+    position: fixed;
+    top: 20px;
+    left: 50%;
+    transform: translateX(-50%);
+    z-index: 999;
+    background-color: rgba(0, 0, 0, 0.7);
+    color: white;
+    border: none;
+    padding: 8px 15px;
+    border-radius: 5px;
+    font-size: 14px;
+    cursor: pointer;
+    font-weight: bold;
+    display: flex;
+    align-items: center;
+    gap: 5px;
+  }
+  #recenterButton svg {
+    width: 16px;
+    height: 16px;
+    fill: white;
+  }
+  #recenterButton:hover {
+    background-color: rgba(0, 0, 0, 0.9);
+  }
+  #playButtonHTML {
+    background-color: rgba(0, 116, 217, 0.8);
+    color: white;
+    border: none;
+    padding: 8px 15px;
+    border-radius: 5px;
+    font-size: 14px;
+    cursor: pointer;
+    font-weight: bold;
+    min-width: 60px;
+    flex-shrink: 0;
+  }
+  #playButtonHTML:hover {
+    background-color: rgba(0, 84, 157, 0.9);
+  }
+  #progressContainer {
+    flex-grow: 1;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  }
+  #progressScrubber {
+    height: 8px;
+    background-color: rgba(255, 255, 255, 0.2);
+    border-radius: 4px;
+    overflow: hidden;
+    cursor: pointer;
+    position: relative;
+  }
+  #progressFill {
+    height: 100%;
+    background-color: rgba(0, 116, 217, 0.8);
+    width: 0%;
+    border-radius: 4px;
+    transition: width 0.1s;
+  }
+  #timeDisplay {
+    color: white;
+    font-size: 12px;
+    font-family: Arial, sans-serif;
+    text-align: right;
+  }
+</style>
